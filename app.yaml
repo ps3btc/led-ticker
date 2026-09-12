@@ -1,0 +1,9 @@
+name: LED Matrix Ticker
+icon: 🔤
+description: Type up to 16 characters and scroll them across a Modulino LED Matrix until you tap stop.
+
+ports:
+  - 7000
+
+bricks:
+  - arduino:web_ui

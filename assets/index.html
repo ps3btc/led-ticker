@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LED Matrix Ticker</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #12141a; color: #e8eaf0;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px;
+  }
+  .card {
+    width: 100%; max-width: 420px; background: #1b1e27;
+    border: 1px solid #2c3140; border-radius: 14px; padding: 22px;
+  }
+  h1 { margin: 0 0 4px; font-size: 19px; font-weight: 600; letter-spacing: .2px; }
+  p.hint { margin: 0 0 18px; color: #9aa3b2; font-size: 13px; }
+  #text {
+    width: 100%; padding: 14px; font-size: 18px; letter-spacing: .5px;
+    color: #e8eaf0; background: #0e1015;
+    border: 1px solid #333a4a; border-radius: 10px;
+  }
+  #text:focus { outline: none; border-color: #5b8def; }
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    flex: 1; min-height: 52px; font-size: 17px; font-weight: 600;
+    border: 0; border-radius: 10px; cursor: pointer; color: #fff;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  #submit { background: #2f6fed; }
+  #stop { background: #3a4152; }
+  .meta { display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #838d9f; }
+  #board.bad { color: #ff8080; }
+  .speed { margin-top: 20px; }
+  .speed-head { display: flex; justify-content: space-between; font-size: 13px; color: #9aa3b2; }
+  input[type=range] {
+    width: 100%; margin: 12px 0 4px; height: 30px;
+    accent-color: #5b8def; background: transparent;
+  }
+  .ends { display: flex; justify-content: space-between; font-size: 11px; color: #6f7a8c; }
+  p.shown { margin: 14px 0 0; font-size: 13px; color: #9aa3b2; }
+  #status { margin-top: 16px; min-height: 22px; font-size: 14px; }
+  #status.err { color: #ff8080; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>LED Matrix Ticker</h1>
+    <p class="hint">Type up to 16 characters, then send them scrolling across the Modulino matrix.</p>
+
+    <form id="form" autocomplete="off">
+      <input id="text" maxlength="16" placeholder="HELLO WORLD" spellcheck="false" autocapitalize="characters">
+      <div class="meta">
+        <span id="count">0 / 16</span>
+        <span id="board">board: checking…</span>
+      </div>
+      <div class="row">
+        <button id="submit" type="submit">Submit</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+    </form>
+
+    <p class="shown" id="shown">nothing on the matrix</p>
+
+    <div class="speed">
+      <div class="speed-head">
+        <span>Scroll speed</span>
+        <span id="speedval">240 ms</span>
+      </div>
+      <input id="speed" type="range" min="40" max="1200" step="20" value="1000">
+      <div class="ends"><span>slow</span><span>fast</span></div>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+<script>
+const MAX = 16;
+const SPAN = 1240;  // MIN_MS + MAX_MS, must match python/main.py
+const toMs = (slider) => SPAN - Number(slider);
+const toSlider = (ms) => SPAN - ms;
+
+const text = document.getElementById('text');
+const count = document.getElementById('count');
+const shown = document.getElementById('shown');
+const status = document.getElementById('status');
+const submit = document.getElementById('submit');
+const stop = document.getElementById('stop');
+const board = document.getElementById('board');
+const speed = document.getElementById('speed');
+const speedval = document.getElementById('speedval');
+let lastSpeed = toMs(speed.value);
+
+function say(msg, isError) {
+  status.textContent = msg;
+  status.classList.toggle('err', !!isError);
+}
+
+function render(state) {
+  stop.disabled = !state.playing;
+  shown.textContent = state.text ? `on the matrix: "${state.text}"` : 'nothing on the matrix';
+  const labels = { true: 'board: matrix detected', false: 'board: no matrix found' };
+  board.textContent = labels[String(state.matrix)] || 'board: not answering';
+  board.classList.toggle('bad', state.matrix !== true);
+  if (Number.isFinite(state.speed)) {
+    lastSpeed = state.speed;
+    speed.value = toSlider(state.speed);
+    speedval.textContent = `${state.speed} ms`;
+  }
+}
+
+async function read(res) {
+  const data = await res.json().catch(() => ({}));
+  if (data.error) {
+    const err = new Error(data.error);
+    err.state = data;
+    throw err;
+  }
+  return data;
+}
+
+const get = (path) => fetch(path).then(read);
+const post = (path, body) => fetch(path, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body || {}),
+}).then(read);
+
+text.addEventListener('input', () => { count.textContent = `${text.value.length} / ${MAX}`; });
+
+speed.addEventListener('input', () => { speedval.textContent = `${toMs(speed.value)} ms`; });
+
+speed.addEventListener('change', async () => {
+  const ms = toMs(speed.value);
+  try {
+    render(await post('/api/speed', { speed: ms }));
+    say(`Speed: ${ms} ms per step.`);
+  } catch (err) {
+    speed.value = toSlider(err.state && err.state.speed ? err.state.speed : lastSpeed);
+    say(err.message, true);
+  }
+});
+
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const value = text.value.trim();
+  if (!value) { say('Type something first.', true); return; }
+  submit.disabled = true;
+  try {
+    render(await post('/api/text', { text: value }));
+    say(`Scrolling "${value}" until you stop it.`);
+  } catch (err) {
+    if (err.state) render(err.state);
+    say(err.message, true);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+stop.addEventListener('click', async () => {
+  stop.disabled = true;
+  try {
+    render(await post('/api/stop'));
+    say('Stopped.');
+  } catch (err) {
+    if (err.state) render(err.state);
+    say(err.message || 'Could not reach the board.', true);
+    stop.disabled = false;
+  }
+});
+
+get('/api/state').then(render).catch(() => say('Board is not responding yet.', true));
+</script>
+</body>
+</html>
