@@ -208,4 +208,4 @@ port like an open microphone:
 
 ## License
 
-Not yet chosen — see `LICENSE` once selected.
+MIT — see [LICENSE](LICENSE).
